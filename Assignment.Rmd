@@ -1,0 +1,129 @@
+---
+title: "Practical Machine Learning: assignment"
+author: "JM"
+date: "08/01/2017"
+output: html_document
+---
+
+#Loading and data preparation
+
+
+```{r load packages, include=TRUE}
+
+library(data.table)
+library(caret)
+library(randomForest)
+library(rpart.plot)
+library(rattle)
+
+training = fread('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv')
+testing = fread('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv')
+
+training = data.frame(training)
+testing = data.frame(testing)
+
+training[training == ""] = NA
+testing[testing == ""] = NA
+```
+
+The next few steps go on to remove variables that have over 60% NAs. In the end, this simplifies the exercise and reduces many unecessary variables. 
+
+```{r data prep, include=TRUE}
+x = vector()
+for (i in 1:ncol(training)){
+  
+  if (sum(is.na(training[,i])) / nrow(training) < .6){
+    
+    x[i] = i
+  } else {
+  x[i] = NA
+  }
+}
+x = na.omit(x)
+
+training = training[,x]
+training = training[,8:ncol(training)]
+```
+
+Furthermore, we should exclude variables that are highly correlated assuming whatever the variance of one explains so will the variance of another. Again, this simplifies the exercise by removing a few additional variables. 
+
+```{r correlation, include=TRUE}
+matrix.corr = cor(na.omit(training[sapply(training, is.numeric)]))
+
+removecor = findCorrelation(matrix.corr, cutoff = .90, verbose = TRUE)
+training.reducecorr = training[,-removecor]
+```
+
+Additionally, we will split the training set for crossvalidation. 
+
+```{r divide train set, include=TRUE}
+inTrain = createDataPartition(y = training.reducecorr$classe, p=0.7, list = FALSE)
+training = training.reducecorr[inTrain,]
+validation = training.reducecorr[-inTrain,]
+```
+
+#Fitting a regressing tree 
+
+We will be using train from the caret package and fitting a regression tree, using the caret package will simplify the exercise.
+
+The final model is displayed below. 
+
+```{r rpart, include=TRUE}
+mod.rpart = train(classe~., data = training, method = 'rpart')
+print(fancyRpartPlot(mod.rpart$finalModel))
+```
+
+Now, how accurate is this model? We use the predict function on the validation set to see how accurate the model is. 
+
+```{r rpart pred, include=TRUE}
+
+pred.rpart = data.frame(rpart = predict(mod.rpart, validation), outcome = validation$classe)
+
+table(pred.rpart$rpart, pred.rpart$outcome)
+```
+
+From the table above we can see that it isn't very accurate. We can make some simple calculations to get to the % of correct predictions and see it gets about half right. 
+
+```{r repart error, include=TRUE}
+sum(pred.rpart$rpart == pred.rpart$outcome)/nrow(pred.rpart)
+```
+
+#Random Forest
+
+Now let's try a random forest before we go on to compare the two models. 
+
+```{r random forest, include=TRUE}
+mod.rf = train(classe~., data = training, method = 'rf')
+mod.rf$finalModel
+```
+
+As it can be seen above, the error rate is 0.76%. We can also see accuracy is quite high.
+
+```{r error, include=TRUE}
+ose=predict(mod.rf,validation,type="raw")
+ose.matrix = with(validation,table(ose,classe))
+sum(diag(ose.matrix))/sum(as.vector(ose.matrix))
+```
+
+#Comparing the models
+
+We can now look at how effective each of these models is. From the table below we can tell that the random forest predicts around 99% accurately whilst the regression tree only gets about 50%. 
+
+```{r comparision, include=TRUE}
+
+pred = data.frame(rpart = predict(mod.rpart, validation), rf = predict(mod.rf, validation), outcome = validation$classe)
+
+rpart.accuracy = sum(pred$rpart == pred$outcome)/nrow(pred)
+rf.accuracy = sum(pred$rf == pred$outcome)/nrow(pred)
+
+accuracy = data.frame(rpart.accuracy,rf.accuracy)
+print(accuracy)
+```
+
+#Conclusion
+
+Having seen that the random forest is quite accurate we go on to apply it to the testing set.
+
+```{r final, include=TRUE}
+predict(mod.rf, testing)
+```
